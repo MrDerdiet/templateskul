@@ -1,0 +1,47 @@
+language: c
+sudo: false
+addons:
+    apt:
+        sources:
+            - r-packages-precise
+        packages:
+            - r-base-dev
+            - r-recommended
+            - haskell-platform
+            - lmodern
+            - pdftk
+cache:
+    directories:
+        - $HOME/prebuild/R
+        - $HOME/prebuild/haskell
+        - $HOME/prebuild/python
+        - $HOME/prebuild/texlive
+        - $HOME/prebuild/libreoffice
+before_install:
+- export R_LIBS_USER=$HOME/prebuild/R PATH=$PATH:$HOME/prebuild/texlive/bin/x86_64-linux:$HOME/prebuild/haskell/bin:$HOME/prebuild/libreoffice/opt/libreoffice5.0/program PYTHONUSERBASE=$HOME/prebuild/python
+- ./.travis.git
+- find $HOME/prebuild -maxdepth 1 -type d -empty -exec ./.travis.deps '{}' ';'
+script:
+- (make && make) &> /dev/null
+- make |& tee error.log
+- for i in 1 2 3; do make handouts-presentation-example handouts-presentation-r-example handouts-presentation-latex; done &> /dev/null
+- make ppt-presentation-example ppt-presentation-r-example ppt-presentation-latex
+- mkdir old-latex && mv *-latex.tex old-latex && make regenerate-latex-templates
+- mkdir new-latex && mv *-latex.tex new-latex && diff -Nur old-latex/ new-latex/
+- gs -sDEVICE=png16m -dSAFER -dBATCH -dNOPAUSE -dTextAlphaBits=4 -dGraphicsAlphaBits=4 -sOutputFile="presentation-example-%03d.png" -r71 'presentation-example.pdf' && mogrify -border 1 -bordercolor black presentation-example-00[13].png
+- "! grep -qE 'LaTeX Error|Undefined control sequence' error.log"
+after_success:
+- mkdir -p kuleuven-templates
+- for i in *.pdf; do
+    pdftk "$i" output "$i.tmp" uncompress;
+    sed -i '/^\/\(Mod\|Creation\)Date (D:/s/[0-9]/0/g' "$i.tmp";
+    pdftk "$i.tmp" output "$i" compress;
+    sed -i '/^\/ID \[/s/[0-9a-fA-F]/D/g' "$i";
+    rm "$i.tmp";
+  done
+- mv *.pdf *.ppt *.Rmd *.markdown *-example.tex presentation-example-00[13].png kuleuven-templates/
+- git add -f kuleuven-templates/
+- git commit -m "$(git log --format=%B -n 1 $TRAVIS_COMMIT)"
+- if test "$TRAVIS_PULL_REQUEST" = "false" -a "$TRAVIS_BRANCH" = "master"; then
+    git push deploy deploy:master;
+  fi
